@@ -1,0 +1,8 @@
+transformers
+numpy==1.24.4
+datasets
+evaluate
+scikit-learn
+mlflow
+fastapi
+uvicorn
