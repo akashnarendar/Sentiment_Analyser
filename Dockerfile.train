@@ -1,0 +1,23 @@
+FROM python:3.10
+
+WORKDIR /app
+
+COPY scripts/check_and_train.py .
+COPY scripts/train.py .
+
+# Install torch (CPU)
+RUN pip install --no-cache-dir torch==2.2.1 --index-url https://download.pytorch.org/whl/cpu
+
+# ✅ Install everything else with exact versions to avoid incompatibility
+RUN pip install --no-cache-dir \
+  "numpy<2" \
+  "transformers==4.39.3" \
+  "accelerate==0.27.2" \
+  "torchvision" \
+  datasets \
+  evaluate \
+  mlflow \
+  pandas \
+  scikit-learn
+
+ENTRYPOINT ["python", "check_and_train.py"]

@@ -9,26 +9,25 @@ from datasets import load_dataset
 import numpy as np
 import evaluate
 import mlflow
-import os
-import sys
+from mlflow.models.signature import infer_signature
+from mlflow.transformers import log_model
+from mlflow import MlflowClient
+import pandas as pd
+from transformers import pipeline
 
-# Ensure relative imports work when run directly
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-# Optional: import evaluation helpers if you create scripts/evaluation.py
-# import evaluation
-
-# Set up MLflow tracking
-mlflow.set_tracking_uri("file:./mlruns")
+# MLflow server location
+mlflow.set_tracking_uri("http://mlflow:5000")
 mlflow.set_experiment("Sentiment Analysis")
 
-# Config
-checkpoint = "distilbert-base-uncased"
-num_epochs = 2
-batch_size = 8
-model_dir = "models/sentiment-sst2-model"
+client = MlflowClient()
 
-# Load dataset and tokenizer
+checkpoint = "distilbert-base-uncased"
+model_name = "sentiment-analyser"
+batch_size = 8
+num_epochs = 2
+
+# Dataset
 dataset = load_dataset("glue", "sst2")
 tokenizer = AutoTokenizer.from_pretrained(checkpoint)
 
@@ -38,19 +37,23 @@ def preprocess(example):
 tokenized_train = dataset["train"].map(preprocess, batched=True)
 tokenized_val = dataset["validation"].map(preprocess, batched=True)
 
-# Load model
+# 🔹 Reduce size for faster training
+small_train = tokenized_train.shuffle(seed=42).select(range(1000))
+small_val = tokenized_val.shuffle(seed=42).select(range(200))
+
+# Model
 model = AutoModelForSequenceClassification.from_pretrained(checkpoint, num_labels=2)
 model.config.id2label = {0: "negative", 1: "positive"}
 model.config.label2id = {"negative": 0, "positive": 1}
 
-# Evaluation metric
+# Metrics
 accuracy_metric = evaluate.load("accuracy")
 def compute_metrics(eval_pred):
     logits, labels = eval_pred
     preds = np.argmax(logits, axis=-1)
     return accuracy_metric.compute(predictions=preds, references=labels)
 
-# Training arguments
+# Trainer
 training_args = TrainingArguments(
     output_dir="./results",
     evaluation_strategy="epoch",
@@ -61,13 +64,9 @@ training_args = TrainingArguments(
     weight_decay=0.01,
     logging_dir="./logs",
     load_best_model_at_end=True,
-    report_to=[],  # Disable default reporting
+    report_to=[],
 )
 
-small_train = tokenized_train.shuffle(seed=42).select(range(5000))
-small_val = tokenized_val.shuffle(seed=42).select(range(500))
-
-# Trainer setup
 trainer = Trainer(
     model=model,
     args=training_args,
@@ -78,25 +77,42 @@ trainer = Trainer(
     compute_metrics=compute_metrics,
 )
 
-# Start MLflow tracking
-with mlflow.start_run():
-    # Log parameters
-    mlflow.log_param("checkpoint", checkpoint)
-    mlflow.log_param("epochs", num_epochs)
-    mlflow.log_param("batch_size", batch_size)
-    mlflow.log_param("dataset", "glue/sst2")
-
-    # Train the model
+# Train and log
+with mlflow.start_run() as run:
     trainer.train()
-
-    # Evaluate and log metrics
     metrics = trainer.evaluate()
-    mlflow.log_metrics({
-        "eval_accuracy": metrics.get("eval_accuracy", 0),
-        "eval_loss": metrics.get("eval_loss", 0)
-    })
 
-    # Save model + tokenizer
-    trainer.save_model(model_dir)
-    tokenizer.save_pretrained(model_dir)
-    mlflow.log_artifacts(model_dir)
+    mlflow.log_params({
+        "checkpoint": checkpoint,
+        "epochs": num_epochs,
+        "batch_size": batch_size,
+        "train_size": 1000,
+        "val_size": 200,
+    })
+    mlflow.log_metrics(metrics)
+
+    input_example = {"text": ["This is great!"]}
+    signature = infer_signature(pd.DataFrame(input_example), ["positive"])
+
+    # Create a pipeline for inference
+    inference_pipeline = pipeline("text-classification", model=model, tokenizer=tokenizer)
+
+
+    # Log the model using MLflow
+    log_model(
+        transformers_model=inference_pipeline,
+        artifact_path="model",
+        input_example=input_example,
+        signature=signature,
+    )
+
+    model_uri = f"runs:/{run.info.run_id}/model"
+    mv = mlflow.register_model(model_uri=model_uri, name=model_name)
+
+    client.set_registered_model_alias(
+        name=model_name,
+        alias="prod",
+        version=mv.version
+    )
+
+    print(f"✅ Model registered as {model_name}@prod (v{mv.version})")

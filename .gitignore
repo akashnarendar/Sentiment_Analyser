@@ -1,0 +1,8 @@
+# Ignore training logs, checkpoints, and heavy artifacts
+mlruns/
+results/
+__pycache__/
+*.pt
+*.ckpt
+*.safetensors
+models/sentiment-sst2-model/pytorch_model.bin

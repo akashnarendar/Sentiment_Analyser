@@ -1,0 +1,24 @@
+FROM python:3.10-slim
+
+WORKDIR /app
+
+COPY app/main.py .
+
+# Upgrade pip
+RUN pip install --upgrade pip
+
+# ✅ Install numpy *first* to make sure PyTorch sees it
+RUN pip install  "numpy<2"
+
+# ✅ Install torch from PyTorch CPU index
+RUN pip install --no-cache-dir torch==2.2.1 --index-url https://download.pytorch.org/whl/cpu
+
+# ✅ Now install other dependencies from PyPI
+RUN pip install --no-cache-dir \
+    transformers==4.39.3 \
+    accelerate==0.27.2 \
+    fastapi uvicorn mlflow pandas
+
+EXPOSE 8000
+
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

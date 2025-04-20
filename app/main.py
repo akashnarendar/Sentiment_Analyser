@@ -1,16 +1,23 @@
+# main.py
 from fastapi import FastAPI
 from pydantic import BaseModel
-from transformers import pipeline
-
-# Load model once at startup
-sentiment_pipe = pipeline("sentiment-analysis", model="models/sentiment-sst2-model")
+import mlflow
+import mlflow.pyfunc
 
 app = FastAPI()
 
-class Query(BaseModel):
+class SentimentRequest(BaseModel):
     text: str
 
+# ✅ Connect to MLflow tracking server
+mlflow.set_tracking_uri("http://mlflow:5000")
+
+# ✅ Load latest production model using alias
+model = mlflow.pyfunc.load_model("models:/sentiment-analyser@prod")
+
 @app.post("/predict")
-def predict_sentiment(query: Query):
-    result = sentiment_pipe(query.text)[0]
-    return {"label": result["label"], "confidence": result["score"]}
+def predict(request: SentimentRequest):
+    prediction = model.predict({"text": [request.text]})
+
+    # ✅ Return full prediction (label + score)
+    return prediction.iloc[0].to_dict()
