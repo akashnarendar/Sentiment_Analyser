@@ -23,4 +23,5 @@ try:
 
 except RestException:
     print(f"⚠️ Model or alias not found. Triggering training...")
+    print("////////")
     subprocess.run(["python", "train.py"], check=True)
